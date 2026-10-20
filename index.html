@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#151515">
+  <meta name="description" content="Available parking spaces">
+  <title>Available Spaces</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --background: #151515;
+      --yellow: #ffbd05;
+      --yellow-soft: #eaa900;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      color: var(--yellow);
+      background:
+        linear-gradient(125deg, rgba(255,255,255,.025) 0%, transparent 36%),
+        radial-gradient(ellipse 70% 75% at 50% 45%, #343434 0%, #222222 49%, var(--background) 100%);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    /* Subtle architectural lines inspired by the charcoal/yellow reference. */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        repeating-linear-gradient(90deg, transparent 0, transparent 109px, rgba(255,255,255,.022) 110px),
+        linear-gradient(113deg, transparent 0 20%, rgba(255,255,255,.025) 20.1%, transparent 20.3% 75%, rgba(255,255,255,.022) 75.1%, transparent 75.3%);
+      opacity: .58;
+    }
+    main {
+      position: relative;
+      z-index: 1;
+      width: min(94vw, 1400px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: clamp(20px, 4vh, 46px);
+      padding: 32px 10px;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(2.15rem, 7.7vw, 7.7rem);
+      font-weight: 800;
+      line-height: 1.06;
+      letter-spacing: -.055em;
+      text-transform: uppercase;
+      text-wrap: balance;
+    }
+    #available {
+      display: block;
+      color: var(--yellow);
+      font-size: clamp(2.4rem, 5vw, 5rem);
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -.03em;
+      font-variant-numeric: tabular-nums;
+    }
+    @media (max-width: 540px) {
+      h1 { font-size: clamp(2.2rem, 9.2vw, 4rem); letter-spacing: -.04em; }
+      #available { font-size: clamp(2.4rem, 9vw, 3.7rem); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>AVAILABLE SPACES</h1>
+    <output id="available" aria-label="Number of available parking spaces" aria-live="polite">--</output>
+  </main>
+  <script>
+    // Public Gist only. No parking API credentials are stored in this page.
+    const GITHUB_USERNAME = 'spielmannlaszlo11-dotcom';
+    const GIST_ID = '9cc975e2d6d46b1fbef3409729fbccab';
+    const REFRESH_MS = 2 * 60 * 1000;
+    const output = document.getElementById('available');
+
+    async function updateAvailableSpaces() {
+      try {
+        const url = `https://gist.githubusercontent.com/${GITHUB_USERNAME}/${GIST_ID}/raw/parking.json?t=${Date.now()}`;
+        const response = await fetch(url, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Parking data request failed: ${response.status}`);
+        const groups = await response.json();
+        if (!Array.isArray(groups) || groups.length === 0) throw new Error('No parking groups were returned');
+        let available = 0;
+        for (const group of groups) {
+          const capacity = Number(group.capacity);
+          const occupied = Number(group.occupation);
+          if (!Number.isFinite(capacity) || !Number.isFinite(occupied) || capacity < 0 || occupied < 0) {
+            throw new Error('Invalid parking group data');
+          }
+          available += Math.max(0, capacity - occupied);
+        }
+        output.textContent = available.toLocaleString('en-US');
+      } catch (error) {
+        // Keep the most recent valid figure; never pretend an error means zero spaces.
+        console.error('Unable to refresh parking availability:', error);
+      }
+    }
+    updateAvailableSpaces();
+    setInterval(updateAvailableSpaces, REFRESH_MS);
+  </script>
+</body>
+</html>
