@@ -68,6 +68,15 @@
       letter-spacing: -.03em;
       font-variant-numeric: tabular-nums;
     }
+
+    #available.is-offline {
+      max-width: min(92vw, 1000px);
+      font-size: clamp(1.15rem, 2.7vw, 2.4rem);
+      line-height: 1.4;
+      font-weight: 500;
+      letter-spacing: 0;
+      text-wrap: balance;
+    }
     @media (max-width: 540px) {
       h1 { font-size: clamp(2.2rem, 9.2vw, 4rem); letter-spacing: -.04em; }
       #available { font-size: clamp(2.4rem, 9vw, 3.7rem); }
@@ -83,10 +92,37 @@
     // Public Gist only. No parking API credentials are stored in this page.
     const GITHUB_USERNAME = 'spielmannlaszlo11-dotcom';
     const GIST_ID = '9cc975e2d6d46b1fbef3409729fbccab';
-    const REFRESH_MS = 2 * 60 * 1000;
+    const OFFLINE_MESSAGE = 'Parking availability is shown Monday to Friday, 07:00-16:00.';
+    const CLOCK_CHECK_MS = 5 * 1000; // Check the local clock, not the parking API.
     const output = document.getElementById('available');
 
-    async function updateAvailableSpaces() {
+    // All scheduling follows Romania time, including daylight saving time.
+    const romanianClock = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Bucharest',
+      weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+    });
+
+    function getScheduleState(now = new Date()) {
+      const time = Object.fromEntries(romanianClock.formatToParts(now)
+        .filter(part => part.type !== 'literal')
+        .map(part => [part.type, part.value]));
+      const minuteOfDay = Number(time.hour) * 60 + Number(time.minute);
+      const workday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(time.weekday);
+      const open = workday && minuteOfDay >= 7 * 60 && minuteOfDay < 16 * 60;
+      if (!open) return {open: false, bucket: null};
+
+      const day = `${time.year}-${time.month}-${time.day}`;
+      const morning = minuteOfDay < 10 * 60;
+      const bucket = morning
+        ? `30s:${day}:${minuteOfDay}:${Math.floor(Number(time.second) / 30)}`
+        : `2m:${day}:${Math.floor(minuteOfDay / 2)}`;
+      return {open: true, bucket};
+    }
+
+    let lastRequestedBucket = null;
+
+    async function updateAvailableSpaces(bucket) {
       try {
         const url = `https://gist.githubusercontent.com/${GITHUB_USERNAME}/${GIST_ID}/raw/parking.json?t=${Date.now()}`;
         const response = await fetch(url, { cache: 'no-store' });
@@ -102,14 +138,41 @@
           }
           available += Math.max(0, capacity - occupied);
         }
+        // Ignore old requests if another reading started or opening hours ended.
+        const state = getScheduleState();
+        if (!state.open || state.bucket !== bucket || lastRequestedBucket !== bucket) return;
+        output.classList.remove('is-offline');
         output.textContent = available.toLocaleString('en-US');
       } catch (error) {
-        // Keep the most recent valid figure; never pretend an error means zero spaces.
+        // Keep the last valid figure during opening hours; never treat a failure as zero.
         console.error('Unable to refresh parking availability:', error);
       }
     }
-    updateAvailableSpaces();
-    setInterval(updateAvailableSpaces, REFRESH_MS);
+
+    function checkSchedule() {
+      const state = getScheduleState();
+      if (!state.open) {
+        output.classList.add('is-offline');
+        output.textContent = OFFLINE_MESSAGE;
+        lastRequestedBucket = null;
+        return;
+      }
+      if (output.classList.contains('is-offline')) {
+        output.classList.remove('is-offline');
+        output.textContent = '--';
+      }
+      if (state.bucket !== lastRequestedBucket) {
+        lastRequestedBucket = state.bucket;
+        updateAvailableSpaces(state.bucket);
+      }
+    }
+
+    checkSchedule();
+    setInterval(checkSchedule, CLOCK_CHECK_MS);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) checkSchedule();
+    });
+    window.addEventListener('focus', checkSchedule);
   </script>
 </body>
 </html>
